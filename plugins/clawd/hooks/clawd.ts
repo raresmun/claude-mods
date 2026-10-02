@@ -1037,7 +1037,10 @@ const ACTS: Record<string, Act> = {
   },
 }
 
-const actOf = (scene: Scene): Act => ACTS[`${scene.mode}:${scene.style}`] ?? {}
+const actOf = (scene: Pick<Scene, 'mode' | 'style'>): Act => ACTS[`${scene.mode}:${scene.style}`] ?? {}
+
+/** How many ticks a timed act plays; undefined for an act that loops until Claude moves on. */
+export const lengthOf = (scene: Pick<Scene, 'mode' | 'style'>): number | undefined => actOf(scene).length
 
 // A Bash command's own act, the first whose pattern it matches; running otherwise.
 const BASH_ACTS: [RegExp, WorkStyle][] = [
@@ -1066,8 +1069,13 @@ const BASH_ACTS: [RegExp, WorkStyle][] = [
   [/\bsleep\s/, 'snooze'],
 ]
 
-/** What Clawd does while a tool runs: some tools have two acts, picked by `random`. */
-export function workFor(tool: string, input: Record<string, unknown>, random: () => number = Math.random): WorkStyle {
+/** What Clawd does while a tool runs: some tools have two acts, picked by `random`; without puns a command just runs. */
+export function workFor(
+  tool: string,
+  input: Record<string, unknown>,
+  random: () => number = Math.random,
+  { puns = true }: { puns?: boolean } = {},
+): WorkStyle {
   const either = (a: WorkStyle, b: WorkStyle) => (random() < 0.5 ? a : b)
   switch (tool) {
     case 'Edit':
@@ -1092,7 +1100,7 @@ export function workFor(tool: string, input: Record<string, unknown>, random: ()
       return 'buddy'
     case 'Bash': {
       const command = typeof input.command === 'string' ? input.command : ''
-      return BASH_ACTS.find(([pattern]) => pattern.test(command))?.[1] ?? 'run'
+      return (puns && BASH_ACTS.find(([pattern]) => pattern.test(command))?.[1]) || 'run'
     }
     default:
       return either('walk', 'tinker')

@@ -29,6 +29,19 @@ He shows up beside the thinking line on your next message.
 - Light: one tiny frame every 100 ms while Claude works (well under 1% of a CPU core), nothing at all when idle.
 - Mods are an early-access Claude Code feature, so an update can break him. If it does, Claude Code skips the mod and carries on as normal.
 
+### Settings
+
+In Claude Code, open `/config` and look for Clawd:
+
+| Setting | Choices | Default |
+|---|---|---|
+| Motion | `normal`, `calm` (slower), `lively` (faster), or `still` (a pose for each act, no animation) | `normal` |
+| Command puns | on, or off to have commands just run | on |
+| Breaks on long turns | on or off | on |
+| When Claude is done | `stay` (he cheers, then waits by the turn's last line) or `hide` (he leaves with the thinking line) | `stay` |
+
+He also holds still when Claude Code's own Reduce motion setting is on.
+
 ### Uninstall
 
 ```

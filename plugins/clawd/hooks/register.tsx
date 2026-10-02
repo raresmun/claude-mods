@@ -4,6 +4,7 @@ import {
   BREAK_STYLES,
   CHEER_STYLES,
   draw,
+  lengthOf,
   MIN_COLUMNS,
   OOPS_STYLES,
   ROWS,
@@ -15,7 +16,8 @@ import {
   type Style,
 } from './clawd'
 
-const TICK_MS = 100
+// Milliseconds between frames, by the Motion setting.
+const TICK_MS: Record<string, number> = { calm: 160, normal: 100, lively: 70 }
 const LONG_TURN_MS = 60_000
 // A long turn's thinking takes a break (coffee, a nap, a song...) this far in, then every so often after.
 const BREAK_AFTER_MS = 30_000
@@ -44,6 +46,8 @@ function bind($: EngineInterface) {
     blit: (requestId: string, cells: string) => void $.ui.blit({ requestId, key: 'stage', cells }).catch(() => undefined),
     every: (ms: number, fn: () => void) => $.clock.every(ms, fn),
     redraw: () => $.ui.invalidate('ui.render'),
+    /** Whether Claude Code's own Reduce motion setting is on, as its /config row says. */
+    isMotionReduced: async () => (await $.config.list()).some(row => row.key === 'prefersReducedMotion' && row.value === true),
   }
 }
 
@@ -66,7 +70,14 @@ function besideLine(
   )
 }
 
-export const register: Register = on => {
+export const register: Register = (on, options) => {
+  // The settings in /config; a change there reloads the module with the new values.
+  const motion = typeof options.motion === 'string' ? options.motion : 'normal'
+  const puns = options.puns !== false
+  const breaks = options.breaks !== false
+  const stays = options.idle !== 'hide'
+  let isStill = motion === 'still'
+
   let scene: Scene = { mode: 'idle', frame: 0, x: 2, dir: 1, headphones: false }
   let engine: ReturnType<typeof bind> | undefined
   // The line Clawd stands beside now: the turn's thinking line, then the line that closes it.
@@ -110,8 +121,13 @@ export const register: Register = on => {
   // An act with no style named picks one of its mode's at random, afresh every time.
   const become = (mode: Mode, style?: Style, then?: 'think' | 'idle') => {
     scene = { ...scene, mode, style: style ?? styleFor(mode), frame: 0, then }
-    if (mode === 'idle') return settle()
-    if (!timer && engine) timer = engine.every(TICK_MS, tick)
+    // Held still, a timed act never plays out by ticks: it goes straight to what follows.
+    if (isStill && lengthOf(scene) !== undefined) {
+      const after = then ?? 'idle'
+      scene = { ...scene, mode: after, style: after === 'think' ? 'bubble' : undefined, then: undefined }
+    }
+    if (scene.mode === 'idle') return settle()
+    if (!isStill && !timer && engine) timer = engine.every(TICK_MS[motion] ?? 100, tick)
     paint()
   }
 
@@ -127,11 +143,14 @@ export const register: Register = on => {
     return next(e)
   })
 
-  on('turn.start', ($, e, next) => {
+  on('turn.start', async ($, e, next) => {
     engine ??= bind($)
+    try {
+      isStill = motion === 'still' || (await engine.isMotionReduced())
+    } catch {}
     startedAt = Date.now()
     endedAt = undefined
-    nextBreakAt = startedAt + BREAK_AFTER_MS
+    nextBreakAt = breaks ? startedAt + BREAK_AFTER_MS : undefined
     failures = 0
     running.clear()
     spinnerId = undefined
@@ -148,7 +167,7 @@ export const register: Register = on => {
     if (e.agentId !== undefined) return next(e)
     const id = e.tool_use_id ?? Symbol('call')
     try {
-      const style = workFor(String(e.tool), e as Record<string, unknown>)
+      const style = workFor(String(e.tool), e as Record<string, unknown>, Math.random, { puns })
       running.set(id, style)
       become('work', style)
     } catch {}
@@ -174,8 +193,9 @@ export const register: Register = on => {
     if (earlyLine !== undefined) lineId = earlyLine
     else isLineDue = true
     earlyLine = undefined
-    if (e.reason === 'answer') become('cheer', undefined, 'idle')
-    else if (e.reason === 'aborted') become('idle')
+    // Set to hide, he leaves with the thinking line: no cheer nobody would see.
+    if (!stays || e.reason === 'aborted') become('idle')
+    else if (e.reason === 'answer') become('cheer', undefined, 'idle')
     else become('oops', undefined, 'idle')
     engine?.redraw()
     return next(e)
@@ -191,7 +211,7 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'TurnDuration' }, async ($, e, next) => {
     const line = await next(e)
-    if (e.surface !== 'terminal') return line
+    if (e.surface !== 'terminal' || !stays) return line
     if (!seenLines.has(e.requestId)) {
       if (isLineDue) {
         lineId = e.requestId

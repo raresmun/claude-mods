@@ -1,4 +1,4 @@
-import { expect, mock, test } from 'claude-code/testing'
+import { expect, mock, test, type TestBody } from 'claude-code/testing'
 
 import {
   BREAK_STYLES,
@@ -196,6 +196,67 @@ test('each tool and command gets its own act', () => {
   expect(workFor('TodoWrite', {})).toBe('clipboard')
   expect(workFor('Agent', {})).toBe('buddy')
   expect(workFor('mcp__tilsio__query', {}, tails)).toBe('tinker')
+})
+
+test('without puns a command just runs, and tools keep their acts', () => {
+  const bare = { puns: false }
+  expect(workFor('Bash', { command: 'git push origin main' }, Math.random, bare)).toBe('run')
+  expect(workFor('Bash', { command: 'cat README.md' }, Math.random, bare)).toBe('run')
+  expect(workFor('WebSearch', {}, Math.random, bare)).toBe('globe')
+})
+
+/** The engine's side of a session: its turns, its lines, its blits counted. */
+function sessionOf(on: Parameters<TestBody>[1]) {
+  const clock = mock.clock(on)
+  const seen = { blits: 0 }
+  on('ui.blit', () => {
+    seen.blits += 1
+    return { value: {} }
+  })
+  on('ui.render', ENGINE)
+  on('session.start', (_$, e) => ({ cwd: e.cwd }))
+  on('turn.start', (_$, e) => ({ turnId: e.turnId }))
+  on('turn.complete', (_$, e) => ({ text: e.answer }))
+  return { clock, seen }
+}
+
+const ANSWERED = { answer: 'ok', durationMs: 1000, isAborted: false, turnId: 't1', reason: 'answer' } as const
+
+test('held still, he takes a pose for each act and never animates', { options: { motion: 'still' } }, async ($, on) => {
+  const { clock, seen } = sessionOf(on)
+  await $.session.start(SESSION)
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  await $.ui.mount(SPINNER)
+  const posed = seen.blits
+  await clock.advance(3000)
+  expect(seen.blits).toBe(posed)
+
+  await $.turn.complete(ANSWERED)
+  const line = await $.ui.mount(closingLine('line-1'))
+  expect((await line.find({ key: 'stage' })) !== undefined).toBe(true)
+  const settled = seen.blits
+  await clock.advance(3000)
+  expect(seen.blits).toBe(settled)
+})
+
+test("Claude Code's own Reduce motion holds him still too", async ($, on) => {
+  const { clock, seen } = sessionOf(on)
+  on('config.list', () => ({ value: [{ key: 'prefersReducedMotion', value: true }] as never }))
+  await $.session.start(SESSION)
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  await $.ui.mount(SPINNER)
+  const posed = seen.blits
+  await clock.advance(3000)
+  expect(seen.blits).toBe(posed)
+})
+
+test('set to hide, he leaves with the thinking line', { options: { idle: 'hide' } }, async ($, on) => {
+  sessionOf(on)
+  await $.session.start(SESSION)
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  await $.turn.complete(ANSWERED)
+  const line = await $.ui.mount(closingLine('line-1'))
+  expect(await line.find({ key: 'stage' })).toBe(undefined)
 })
 
 test('a command that runs and runs brings out the popcorn', () => {

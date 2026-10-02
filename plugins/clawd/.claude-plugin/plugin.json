@@ -1,10 +1,38 @@
 {
   "name": "clawd",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Clawd, the Claude mascot, thinks, types, runs and celebrates beside the thinking line, a little differently each turn",
   "author": { "name": "raresmun" },
   "homepage": "https://github.com/raresmun/claude-mods/tree/main/plugins/clawd",
   "repository": "https://github.com/raresmun/claude-mods",
   "license": "MIT",
-  "keywords": ["mod", "mascot", "clawd", "animation", "fun"]
+  "keywords": ["mod", "mascot", "clawd", "animation", "fun"],
+  "userConfig": {
+    "motion": {
+      "type": "string",
+      "title": "Motion",
+      "description": "How lively Clawd is. still: a pose for each act and no animation, which is also what he does when Claude Code's Reduce motion is on.",
+      "default": "normal",
+      "options": ["normal", "calm", "lively", "still"]
+    },
+    "puns": {
+      "type": "boolean",
+      "title": "Command puns",
+      "description": "Act out commands: a rocket for git push, a cat for cat, ping-pong for ping. Off: he simply runs.",
+      "default": true
+    },
+    "breaks": {
+      "type": "boolean",
+      "title": "Breaks on long turns",
+      "description": "Coffee, a nap, fishing and the like while a long turn is thinking.",
+      "default": true
+    },
+    "idle": {
+      "type": "string",
+      "title": "When Claude is done",
+      "description": "stay: he cheers and then waits beside the turn's last line. hide: he leaves with the thinking line.",
+      "default": "stay",
+      "options": ["stay", "hide"]
+    }
+  }
 }
