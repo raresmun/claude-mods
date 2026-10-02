@@ -1,0 +1,16 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "raresmun-mods",
+  "description": "Claude Code mods by raresmun",
+  "owner": { "name": "raresmun" },
+  "plugins": [
+    {
+      "name": "clawd",
+      "description": "Clawd, the Claude mascot, thinks, types, runs and celebrates beside the thinking line, a little differently each turn",
+      "author": { "name": "raresmun" },
+      "source": "./plugins/clawd",
+      "category": "fun",
+      "homepage": "https://github.com/raresmun/claude-mods/tree/main/plugins/clawd"
+    }
+  ]
+}
