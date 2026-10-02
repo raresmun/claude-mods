@@ -160,11 +160,4 @@ for (const [mode, styles] of [
   for (const style of styles) gif(`${mode}-${style}`, play(mode, style))
 }
 gif('think-bubble-headphones', play('think', 'bubble', { headphones: true }))
-gif('hero', [
-  ...play('think', 'bubble').slice(0, 24),
-  ...play('work', 'type').slice(0, 24),
-  ...play('work', 'rocket'),
-  ...play('cheer', 'fireworks'),
-  ...play('idle').slice(0, 8),
-])
 console.log(`GIFs written to ${OUT}`)

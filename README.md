@@ -6,7 +6,7 @@ Mods for [Claude Code](https://code.claude.com): small plugins that change how C
 
 ## Clawd
 
-![Clawd thinks, types, launches a rocket and cheers with fireworks](docs/clawd/hero.gif)
+![Clawd beside Claude Code's thinking line: a cat for cat README.md, a disguise for sudo, a table flip on the second error, an explosion for git push --force](docs/clawd/demo.gif)
 
 A tiny pixel Clawd who lives next to Claude Code's thinking line and acts out what Claude is doing: 74 acts, picked at random or by the tool and command Claude is running. When the turn ends he cheers beside the "Baked for 12s" line, then stands still until your next message.
 
