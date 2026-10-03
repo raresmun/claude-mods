@@ -112,12 +112,10 @@ export const MIN_COLUMNS = 14
 /** Ticks a plain command runs before Clawd fetches popcorn to watch it. */
 export const POPCORN_AFTER = 80
 
-const WIDTH = 10
-const STAND = [1, 3, 6, 8]
-const STRIDE = [2, 4, 5, 7]
-const TAP = [1, 3, 6]
-// The offset at which `at` puts a prop just past Clawd's arm: the acts lay their props out from it.
-const REACH = 12
+const WIDTH = 12
+const STAND = [2, 4, 7, 9]
+const STRIDE = [1, 3, 8, 10]
+const TAP = [2, 4, 7]
 
 const NONE = -1
 const DEFAULT = 0x01000000
@@ -285,7 +283,7 @@ const cat = ({ at, frame }: Stage, o: number, isWalking: boolean) => {
 }
 
 // A game is played from the stage's left edge, a buddy for each subagent seated in a row beside Clawd.
-const SEAT = WIDTH + 2 // the first buddy's left edge, clear of Clawd's hand
+const SEAT = 14 // the first buddy's left edge, clear of Clawd's hand
 const PITCH = 5 // a buddy is 4 pixels wide, with a pixel between neighbours
 const PASS = 6 // ticks a throw takes, hand to hand
 
@@ -744,8 +742,8 @@ const ACTS: Record<string, Act> = {
   'work:disguise': {
     ...walking(0.5),
     props: ({ put, x }) => {
-      for (let i = 2; i <= WIDTH - 3; i++) put(x + i, 1, SHADES)
-      for (const i of [4, 5]) put(x + i, 2, STACHE)
+      for (let i = 2; i <= 9; i++) put(x + i, 1, SHADES)
+      for (const i of [4, 5, 6, 7]) put(x + i, 2, STACHE)
     },
   },
   'work:boom': {
@@ -1000,7 +998,7 @@ const ACTS: Record<string, Act> = {
     props: ({ put, x, frame }) => {
       if (frame < 3) return
       const y = Math.min(1, frame - 4)
-      for (let i = 2; i <= WIDTH - 3; i++) put(x + i, y, SHADES)
+      for (let i = 2; i <= 9; i++) put(x + i, y, SHADES)
       if (frame >= 10 && frame % 4 < 2) put(x + 3, 1, WHITE) // a glint
     },
   },
@@ -1316,9 +1314,7 @@ export function draw(scene: Scene, columns: number): string {
   const buddies = Math.min(scene.buddies ?? 0, seatsFor(width))
   const pose: Pose = { ...REST, ...act.pose?.({ frame, side, dir, buddies, width }) }
   const x = home + pose.shift
-  // He stands a pixel above the stage's floor: his two body rows then share their cells with no
-  // empty pixel, which is what lets a cell show an eye in its own colour.
-  const top = -pose.lift // the body's first row; the legs are at top + 2
+  const top = -pose.lift // the body's first row; the legs are at top + 3
   const [armLeft, armRight] = side > 0 ? [pose.far, pose.near] : [pose.near, pose.far]
   const left = 1 + pose.squeeze
   const right = WIDTH - 2 - pose.squeeze
@@ -1328,18 +1324,17 @@ export function draw(scene: Scene, columns: number): string {
     put(x + left - 1, top, CUP)
     put(x + right + 1, top, CUP)
   }
-  for (let row = 0; row < 2; row++) for (let i = left; i <= right; i++) put(x + i, top + row, pose.body)
+  for (let row = 0; row < 3; row++) for (let i = left; i <= right; i++) put(x + i, top + row, pose.body)
   put(x + left - 1, top + 1 + armLeft, pose.body)
   put(x + right + 1, top + 1 + armRight, pose.body)
   if (!pose.eyesShut) {
-    const eyeRow = pose.eyesUp || pose.mouth ? top : top + 1 // an open mouth takes the lower row
+    const eyeRow = pose.eyesUp ? top : top + 1
     const inset = Math.floor(pose.squeeze / 2)
     put(x + 3 + inset + pose.look, eyeRow, EYE)
-    put(x + 6 - inset + pose.look, eyeRow, EYE)
+    put(x + 8 - inset + pose.look, eyeRow, EYE)
   }
-  if (pose.mouth) for (const i of [4, 5]) put(x + i, top + 1, EYE)
-  for (const i of pose.legs) if (i >= left && i <= right) put(x + i, top + 2, pose.body)
-  const reach = (offset: number) => offset - REACH + WIDTH
+  if (pose.mouth) for (const i of [5, 6]) put(x + i, top + 2, EYE)
+  for (const i of pose.legs) if (i >= left && i <= right) put(x + i, top + 3, pose.body)
   act.props?.({
     frame,
     side,
@@ -1348,7 +1343,7 @@ export function draw(scene: Scene, columns: number): string {
     width,
     x,
     put,
-    at: (offset, y, color) => put(side > 0 ? x + reach(offset) : x + WIDTH - 1 - reach(offset), y, color),
+    at: (offset, y, color) => put(side > 0 ? x + offset : x + WIDTH - 1 - offset, y, color),
   })
 
   const words = new Uint32Array(columns * ROWS * 3)
