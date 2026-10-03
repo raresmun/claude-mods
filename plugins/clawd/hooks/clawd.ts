@@ -78,6 +78,7 @@ export const BREAK_STYLES = [
   'ball',
   'fishing',
 ] as const
+export const PLAY_STYLES = ['catch', 'stadium', 'conga', 'highfive', 'pyramid'] as const
 
 export type WorkStyle = (typeof WORK_STYLES)[number]
 export type Style =
@@ -86,7 +87,8 @@ export type Style =
   | (typeof OOPS_STYLES)[number]
   | (typeof CHEER_STYLES)[number]
   | (typeof BREAK_STYLES)[number]
-export type Mode = 'idle' | 'think' | 'work' | 'oops' | 'cheer' | 'break'
+  | (typeof PLAY_STYLES)[number]
+export type Mode = 'idle' | 'think' | 'work' | 'oops' | 'cheer' | 'break' | 'play'
 
 export type Scene = {
   mode: Mode
@@ -99,6 +101,8 @@ export type Scene = {
   dir: 1 | -1
   /** Worn once a turn has run long. */
   headphones: boolean
+  /** Subagents running, each a buddy to play with while Claude waits on them. */
+  buddies?: number
   /** Where a timed act (an error, a cheer, a break) goes once it has played. */
   then?: 'think' | 'idle'
 }
@@ -185,6 +189,7 @@ const FIREWORK = [0xf5c542, 0xff5a7a, 0x7ac7ff, 0x5cc46a]
 const RAINBOW = [0xe5484d, 0xff8c2a, 0xf5c542, 0x5cc46a, 0x4c9ae5, 0x9b6bd9]
 const BOOM = [0xff5a2a, 0xffd84d, 0xff8c2a]
 const FADE = [0xe8e8e8, 0xa8a8a8, 0x6e6e6e]
+const TEAM = [0x5aa0f0, 0x62c97a, 0xa77be0, 0xf06aa0, 0x56c8c8] // a colour for each buddy's seat
 
 // The glyph for each set of lit quarters: top-left 1, top-right 2, bottom-left 4, bottom-right 8.
 const QUADRANTS = [
@@ -208,7 +213,13 @@ type Pose = {
   squeeze: number // pixels pressed in from each side
 }
 
-type Cue = { frame: number; side: 1 | -1; dir: 1 | -1 }
+type Cue = {
+  frame: number
+  side: 1 | -1
+  dir: 1 | -1
+  buddies: number // seated beside him for a game, as many as the stage has room for
+  width: number // the stage's, in pixels
+}
 
 type Stage = Cue & {
   /** A prop's pixel, `offset` pixels out from Clawd's left edge on the side with room. */
@@ -269,6 +280,92 @@ const cat = ({ at, frame }: Stage, o: number, isWalking: boolean) => {
   for (let dx = 0; dx <= 5; dx++) at(o + dx, 2, CAT)
   for (const dx of isWalking && frame % 2 ? [1, 4] : [0, 2, 5]) at(o + dx, 3, CAT)
   at(o + 6, frame % 4 < 2 ? 1 : 2, CAT)
+}
+
+// A game is played from the stage's left edge, a buddy for each subagent seated in a row beside Clawd.
+const SEAT = 14 // the first buddy's left edge, clear of Clawd's hand
+const PITCH = 5 // a buddy is 4 pixels wide, with a pixel between neighbours
+const PASS = 6 // ticks a throw takes, hand to hand
+
+const seat = (i: number) => SEAT + PITCH * i
+
+/** How many buddies a stage this many pixels wide has seats for. */
+const seatsFor = (width: number) => Math.min(TEAM.length, Math.floor((width - SEAT - 4) / PITCH) + 1)
+
+/** Step `k` of `steps` on the way from `from` to `to`, to the nearest pixel. */
+const along = (from: number, to: number, k: number, steps: number) => Math.round(from + ((to - from) * k) / steps)
+
+/**
+ * A subagent as a mini Clawd in its seat's colour: its body on row `y`, its legs below. No eye:
+ * mid-hop, its cell would show the eye's colour over half the body.
+ */
+const mini = (put: Stage['put'], x: number, y: number, i: number, isStepping = false) => {
+  const color = cycle(TEAM, i)
+  for (let dx = 0; dx < 4; dx++) put(x + dx, y, color)
+  for (const dx of isStepping ? [1, 2] : [0, 3]) put(x + dx, y + 1, color)
+}
+
+/** The buddies in their seats, all but the one who is up. */
+const seated = (put: Stage['put'], buddies: number, away?: number) => {
+  for (let i = 0; i < buddies; i++) if (i !== away) mini(put, seat(i), 2, i)
+}
+
+/** A throw down the line of players, Clawd first, then back up it: who throws, who catches, ticks into the throw. */
+const passOf = (frame: number, players: number) => {
+  const throws = 2 * Math.max(1, players - 1)
+  const k = Math.floor(frame / PASS) % throws
+  const isDown = k < throws / 2
+  const from = isDown ? k : throws - k
+  return { from, to: isDown ? from + 1 : from - 1, t: frame % PASS }
+}
+
+/** The player the wave lifts now: down the line two ticks apiece, back up it, then a breather; -1 for nobody. */
+const crestOf = (frame: number, players: number) => {
+  const lap = 2 * players
+  const t = frame % (2 * lap + 6)
+  return t < lap ? Math.floor(t / 2) : t < 2 * lap ? players - 1 - Math.floor((t - lap) / 2) : -1
+}
+
+/** Clawd's left edge at the head of a conga line that dances across the stage and comes round again. */
+const congaX = (frame: number, buddies: number, width: number) =>
+  ((Math.floor(frame / 2) + WIDTH) % (width + WIDTH + PITCH * buddies)) - WIDTH
+
+/** Who runs up for a high five, where they are, and whether hands meet now: each in turn, from the nearest seat. */
+const highFiveOf = (frame: number, buddies: number) => {
+  const runs = Array.from({ length: buddies }, (_, i) => seat(i) - WIDTH - 1) // from the seat to Clawd's hand
+  let t = frame % Math.max(1, runs.reduce((sum, run) => sum + 2 * run + 6, 0))
+  for (const [who, run] of runs.entries()) {
+    if (t < 2 * run + 6) {
+      const x = t < run ? seat(who) - 1 - t : t < run + 4 ? WIDTH + 1 : Math.min(seat(who), WIDTH - 2 + t - run)
+      return { who, x, isSlap: t === run + 1 || t === run + 2 }
+    }
+    t -= 2 * run + 6
+  }
+  return undefined
+}
+
+/** The base in their seats, the rest climbing onto their shoulders in turn; a lone buddy goes up on Clawd's hand. */
+const pyramidOf = (frame: number, buddies: number) => {
+  const tops = buddies === 1 ? 1 : Math.floor(buddies / 2)
+  const base = buddies - tops
+  const built = 6 * tops
+  const t = frame % (built + 34)
+  const spots = Array.from({ length: buddies }, (_, i) => {
+    if (i < base) return { x: seat(i), y: 2 }
+    const j = i - base
+    const top = base === 0 ? WIDTH : tops < base ? seat(j) + 2 : seat(j)
+    if (t < built) {
+      const k = t - 6 * j
+      return k < 0 ? { x: seat(i), y: 2 } : k < 6 ? { x: along(seat(i), top, k, 5), y: k === 0 ? 1 : 0 } : { x: top, y: 0 }
+    }
+    if (t < built + 20) return { x: top + (t < built + 10 ? 0 : Math.floor(t / 2) % 2 ? 1 : -1), y: 0 } // ta-da, then a wobble
+    if (t < built + 26) {
+      const k = t - built - 20
+      return { x: along(top, seat(i), k, 5), y: k < 2 ? 0 : k < 4 ? 1 : 2 } // and down they tumble
+    }
+    return { x: seat(i), y: 2 }
+  })
+  return { spots, isUp: t >= built && t < built + 20, isFalling: t >= built + 20 && t < built + 26 }
 }
 
 const ACTS: Record<string, Act> = {
@@ -1035,6 +1132,58 @@ const ACTS: Record<string, Act> = {
       }
     },
   },
+
+  // While Claude waits on subagents: a game with a buddy for each.
+  'play:catch': {
+    pose: ({ frame, buddies }) => {
+      const { from, to, t } = passOf(frame, buddies + 1)
+      const isHis = (from === 0 && t < 2) || (to === 0 && t >= PASS - 2)
+      return { look: 1, eyesUp: t > 0 && t < PASS - 1, near: isHis ? -1 : 0 }
+    },
+    props: ({ put, frame, buddies }) => {
+      seated(put, buddies)
+      const { from, to, t } = passOf(frame, buddies + 1)
+      const hand = (player: number) => (player === 0 ? WIDTH : seat(player - 1) + 2)
+      put(along(hand(from), hand(to), t, PASS - 1), t > 0 && t < PASS - 1 ? 0 : 1, BALL)
+    },
+  },
+  'play:stadium': {
+    pose: ({ frame, buddies }) => (crestOf(frame, buddies + 1) === 0 ? { near: -1, far: -1, mouth: true } : {}),
+    props: ({ put, frame, buddies }) => {
+      const crest = crestOf(frame, buddies + 1)
+      for (let i = 0; i < buddies; i++) mini(put, seat(i), crest === i + 1 ? 1 - (frame % 2) : 2, i)
+    },
+  },
+  'play:conga': {
+    pose: ({ frame, buddies, width }) => ({
+      shift: congaX(frame, buddies, width),
+      look: 1,
+      legs: Math.floor(frame / 2) % 2 ? STRIDE : STAND,
+    }),
+    props: ({ put, x, frame, buddies }) => {
+      const beat = Math.floor(frame / 2) % 4 // one, two, three, kick!
+      for (let i = 0; i < buddies; i++) mini(put, x - PITCH * (i + 1), beat === 3 ? 1 : 2, i, beat % 2 === 1)
+    },
+  },
+  'play:highfive': {
+    pose: ({ frame, buddies }) => (highFiveOf(frame, buddies)?.isSlap ? { look: 1, near: -1, mouth: true } : { look: 1 }),
+    props: ({ put, frame, buddies }) => {
+      const turn = highFiveOf(frame, buddies)
+      seated(put, buddies, turn?.who)
+      if (!turn) return
+      // On the way he leapfrogs the buddies seated nearer Clawd.
+      const isOver = Array.from({ length: turn.who }, (_, i) => seat(i)).some(s => Math.abs(turn.x - s) < 4)
+      mini(put, turn.x, turn.isSlap ? 1 : isOver ? 0 : 2, turn.who, turn.x !== seat(turn.who) && frame % 2 === 1)
+      if (turn.isSlap) put(WIDTH, 0, SPARK)
+    },
+  },
+  'play:pyramid': {
+    pose: ({ frame, buddies }) => {
+      const { isUp, isFalling } = pyramidOf(frame, buddies)
+      return isUp ? { near: -1, far: -1, mouth: true } : isFalling ? { near: -1, eyesShut: true } : { look: 1 }
+    },
+    props: ({ put, frame, buddies }) => pyramidOf(frame, buddies).spots.forEach(({ x, y }, i) => mini(put, x, y, i)),
+  },
 }
 
 const actOf = (scene: Pick<Scene, 'mode' | 'style'>): Act => ACTS[`${scene.mode}:${scene.style}`] ?? {}
@@ -1160,9 +1309,10 @@ export function draw(scene: Scene, columns: number): string {
   }
   const { frame, dir } = scene
   const act = actOf(scene)
-  const home = Math.min(scene.x, Math.max(0, width - WIDTH))
+  const home = scene.mode === 'play' ? 0 : Math.min(scene.x, Math.max(0, width - WIDTH))
   const side = home + WIDTH + 13 <= width ? 1 : -1 // props go where there is room
-  const pose: Pose = { ...REST, ...act.pose?.({ frame, side, dir }) }
+  const buddies = Math.min(scene.buddies ?? 0, seatsFor(width))
+  const pose: Pose = { ...REST, ...act.pose?.({ frame, side, dir, buddies, width }) }
   const x = home + pose.shift
   const top = -pose.lift // the body's first row; the legs are at top + 3
   const [armLeft, armRight] = side > 0 ? [pose.far, pose.near] : [pose.near, pose.far]
@@ -1189,6 +1339,8 @@ export function draw(scene: Scene, columns: number): string {
     frame,
     side,
     dir,
+    buddies,
+    width,
     x,
     put,
     at: (offset, y, color) => put(side > 0 ? x + offset : x + WIDTH - 1 - offset, y, color),

@@ -5,6 +5,7 @@ import {
   CHEER_STYLES,
   draw,
   OOPS_STYLES,
+  PLAY_STYLES,
   POPCORN_AFTER,
   ROWS,
   step,
@@ -44,6 +45,7 @@ const ENGINE = (_$: unknown, e: { component: string }) => ({
 
 const BLOCKS = [0x2580, 0x2584, 0x2588, 0x258c, 0x2590, 0x2596, 0x2597, 0x2598, 0x2599, 0x259a, 0x259b, 0x259c, 0x259d, 0x259e, 0x259f]
 const HEADPHONES = [0x4c6fd0]
+const TEAM = [0x5aa0f0, 0x62c97a, 0xa77be0, 0xf06aa0, 0x56c8c8] // the buddies' colours, by seat
 const printable = (point: number) => point === 0x20 || BLOCKS.includes(point)
 
 /** A frame's cells, after checking it holds exactly columns × ROWS of them. */
@@ -59,6 +61,13 @@ function cellsOf(cells: string, columns: number): { point: number; fg: number; b
 
 const wearsHeadphones = (cells: string, columns: number) =>
   cellsOf(cells, columns).some(cell => HEADPHONES.includes(cell.fg) || HEADPHONES.includes(cell.bg))
+
+/** The seats a frame shows a buddy in, by their colours. */
+const seatsIn = (cells: string, columns: number) =>
+  cellsOf(cells, columns)
+    .flatMap(cell => [cell.fg, cell.bg])
+    .map(color => TEAM.indexOf(color))
+    .filter(seat => seat >= 0)
 
 test('Clawd stands beside the thinking line, which the engine still draws', async ($, on) => {
   on('ui.render', ENGINE)
@@ -124,6 +133,7 @@ const MODES = [
   ['oops', OOPS_STYLES],
   ['cheer', CHEER_STYLES],
   ['break', BREAK_STYLES],
+  ['play', PLAY_STYLES],
 ] as const
 
 const POSES: Pick<Scene, 'mode' | 'style'>[] = [
@@ -150,10 +160,31 @@ test('every act of a mode looks different from the others', () => {
   for (const [mode, styles] of MODES) {
     const looks = new Set<string>(
       styles.map((style: NonNullable<Scene['style']>) =>
-        [0, 2, 5, 9, 12].map(frame => draw({ mode, style, frame, x: 8, dir: 1, headphones: false }, 20)).join(),
+        [0, 2, 5, 9, 12].map(frame => draw({ mode, style, frame, x: 8, dir: 1, headphones: false, buddies: 3 }, 20)).join(),
       ),
     )
     expect(looks.size).toBe(styles.length)
+  }
+})
+
+test('every game seats a buddy for each subagent, as many as the stage has room for', () => {
+  for (const [columns, room] of [
+    [14, 3],
+    [20, 5],
+  ] as const) {
+    for (const style of PLAY_STYLES) {
+      for (const buddies of [0, 1, 2, 3, 5, 8]) {
+        const seats = new Set<number>()
+        let isPrintable = true
+        for (let frame = 0; frame < 300; frame++) {
+          const cells = draw({ mode: 'play', style, frame, x: 0, dir: 1, headphones: false, buddies }, columns)
+          isPrintable &&= cellsOf(cells, columns).every(cell => printable(cell.point))
+          for (const seat of seatsIn(cells, columns)) seats.add(seat)
+        }
+        expect(isPrintable).toBe(true)
+        expect(seats.size).toBe(Math.min(buddies, room))
+      }
+    }
   }
 })
 
@@ -205,12 +236,13 @@ test('without puns a command just runs, and tools keep their acts', () => {
   expect(workFor('WebSearch', {}, Math.random, bare)).toBe('globe')
 })
 
-/** The engine's side of a session: its turns, its lines, its blits counted. */
+/** The engine's side of a session: its turns, its lines, its blits counted and their frames kept. */
 function sessionOf(on: Parameters<TestBody>[1]) {
   const clock = mock.clock(on)
-  const seen = { blits: 0 }
-  on('ui.blit', () => {
+  const seen = { blits: 0, frames: [] as string[] }
+  on('ui.blit', (_$, e) => {
     seen.blits += 1
+    if ('cells' in e) seen.frames.push(e.cells)
     return { value: {} }
   })
   on('ui.render', ENGINE)
@@ -311,4 +343,68 @@ test('Clawd animates through a turn, then stands still with no timer left', asyn
   const settled = blits
   await clock.advance(10_000)
   expect(blits).toBe(settled)
+})
+
+const subagent = (id: string, status: string) => ({ id, description: id, type: 'general-purpose', status })
+
+/** The seats shown since the last look, in order. */
+function seatsShown(seen: { frames: string[] }): number[] {
+  const seats = new Set(seen.frames.flatMap(cells => seatsIn(cells, 20)))
+  seen.frames.length = 0
+  return [...seats].sort()
+}
+
+test('waiting on subagents, Clawd plays with a buddy for each, but not while Claude works', async ($, on) => {
+  const { clock, seen } = sessionOf(on)
+  on('agent.list', () => ({ value: [subagent('a1', 'running'), subagent('a2', 'completed'), subagent('a3', 'running')] as never }))
+  await $.session.start(SESSION)
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  await $.ui.mount(SPINNER)
+  await $.turn.complete(ANSWERED)
+  await $.ui.mount(closingLine('line-1'))
+  await clock.advance(2000) // the cheer
+  seatsShown(seen)
+  await clock.advance(4000)
+  expect(seatsShown(seen)).toEqual([0, 1])
+
+  await $.turn.start({ text: '', turnId: 't2' }) // a subagent's news wakes Claude
+  await $.ui.mount({ ...SPINNER, requestId: 'main-2' })
+  await clock.advance(3000)
+  expect(seatsShown(seen)).toEqual([])
+})
+
+test('a buddy leaves when its subagent is done, and with the last gone he rests with no timer left', async ($, on) => {
+  const { clock, seen } = sessionOf(on)
+  let agents = [subagent('a1', 'running'), subagent('a2', 'running')]
+  on('agent.list', () => ({ value: agents as never }))
+  await $.session.start(SESSION)
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  await $.turn.complete(ANSWERED)
+  await $.ui.mount(closingLine('line-1'))
+  await clock.advance(2000)
+
+  agents = [subagent('a1', 'completed'), subagent('a2', 'running')]
+  await $.turn.complete({ ...ANSWERED, turnId: 'a1-run', agentId: 'a1' })
+  seatsShown(seen)
+  await clock.advance(1000) // sooner than the next roll call
+  expect(seatsShown(seen)).toEqual([0])
+
+  agents = [subagent('a1', 'completed'), subagent('a2', 'killed')] // stopped: no turn of its own ends
+  await clock.advance(4000) // the next roll call finds it gone
+  const rested = seen.blits
+  await clock.advance(10_000)
+  expect(seen.blits).toBe(rested)
+})
+
+test('set to hide, he leaves with the thinking line even while subagents run', { options: { idle: 'hide' } }, async ($, on) => {
+  const { clock, seen } = sessionOf(on)
+  on('agent.list', () => ({ value: [subagent('a1', 'running')] as never }))
+  await $.session.start(SESSION)
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  await $.ui.mount(SPINNER)
+  await $.turn.complete(ANSWERED)
+  await clock.advance(1000)
+  const rested = seen.blits
+  await clock.advance(10_000)
+  expect(seen.blits).toBe(rested)
 })

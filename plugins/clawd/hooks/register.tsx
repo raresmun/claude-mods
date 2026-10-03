@@ -7,6 +7,7 @@ import {
   lengthOf,
   MIN_COLUMNS,
   OOPS_STYLES,
+  PLAY_STYLES,
   ROWS,
   step,
   THINK_STYLES,
@@ -22,14 +23,17 @@ const LONG_TURN_MS = 60_000
 // A long turn's thinking takes a break (coffee, a nap, a song...) this far in, then every so often after.
 const BREAK_AFTER_MS = 30_000
 const BREAK_GAP_MS = 25_000
+// Waiting on subagents, a new game every so often, and every few seconds a look at which of them still run.
+const GAME_TICKS = 200
+const ROLL_CALL_TICKS = 30
 const STAGE_COLUMNS = 20
 // Room kept for the engine's own line (the thinking line, the turn's closing line) beside Clawd.
 const LINE_COLUMNS = 52
 
 const pick = <T,>(choices: readonly T[]): T | undefined => choices[Math.floor(Math.random() * choices.length)]
 
-/** A fresh act for a mode that has a choice of them. */
-const styleFor = (mode: Mode): Style | undefined =>
+/** A fresh act for a mode that has a choice of them; for a game, another than the one just played. */
+const styleFor = (mode: Mode, current?: Style): Style | undefined =>
   mode === 'think'
     ? pick(THINK_STYLES)
     : mode === 'oops'
@@ -38,7 +42,9 @@ const styleFor = (mode: Mode): Style | undefined =>
         ? pick(CHEER_STYLES)
         : mode === 'break'
           ? pick(BREAK_STYLES)
-          : undefined
+          : mode === 'play'
+            ? pick(PLAY_STYLES.filter(game => game !== current))
+            : undefined
 
 /** The calls the animation makes, each spelled on a hook's `$` so the engine reads them off the source. */
 function bind($: EngineInterface) {
@@ -48,6 +54,8 @@ function bind($: EngineInterface) {
     redraw: () => $.ui.invalidate('ui.render'),
     /** Whether Claude Code's own Reduce motion setting is on, as its /config row says. */
     isMotionReduced: async () => (await $.config.list()).some(row => row.key === 'prefersReducedMotion' && row.value === true),
+    /** The ids of the session's subagents still running. */
+    subagents: async () => (await $.agent.list()).filter(agent => agent.status === 'running').map(agent => agent.id),
   }
 }
 
@@ -93,11 +101,13 @@ export const register: Register = (on, options) => {
   let nextBreakAt: number | undefined
   let failures = 0 // tool calls failed in a row; the second one flips the table
   const running = new Map<string | symbol, Style>()
+  const gang = new Set<string>() // the subagents running, a buddy each
 
   // The headphones go on once a turn has run for a minute, and come off when it ends.
   const dressed = (): Scene => ({
     ...scene,
     headphones: startedAt !== undefined && endedAt === undefined && Date.now() - startedAt >= LONG_TURN_MS,
+    buddies: gang.size,
   })
   const paint = () => {
     if (stage && engine) engine.blit(stage.requestId, draw(dressed(), stage.columns))
@@ -109,26 +119,49 @@ export const register: Register = (on, options) => {
     paint()
     engine?.redraw()
   }
+  // A turn over with subagents still running, he plays with them rather than standing idle.
+  const isPlaytime = () => stays && endedAt !== undefined && gang.size > 0
+  const rest = (): void => (isPlaytime() ? become('play') : settle())
   const tick = () => {
     scene = step(scene, stage?.columns ?? STAGE_COLUMNS)
-    if (scene.mode === 'idle') return settle()
+    if (scene.mode === 'idle') return rest()
     if (scene.mode === 'think' && nextBreakAt !== undefined && Date.now() >= nextBreakAt) {
       nextBreakAt = Date.now() + BREAK_GAP_MS + Math.random() * BREAK_GAP_MS
       return become('break', undefined, 'think')
     }
+    if (scene.mode === 'play' && scene.frame % ROLL_CALL_TICKS === 0) void rollCall()
+    if (scene.mode === 'play' && scene.frame >= GAME_TICKS) return become('play')
     paint()
   }
   // An act with no style named picks one of its mode's at random, afresh every time.
-  const become = (mode: Mode, style?: Style, then?: 'think' | 'idle') => {
-    scene = { ...scene, mode, style: style ?? styleFor(mode), frame: 0, then }
+  const become = (mode: Mode, style?: Style, then?: 'think' | 'idle'): void => {
+    // A game starts from the stage's left edge, and he stays there once it is over.
+    const place = mode === 'play' ? { x: 0, dir: 1 as const } : {}
+    scene = { ...scene, ...place, mode, style: style ?? styleFor(mode, scene.style), frame: 0, then }
     // Held still, a timed act never plays out by ticks: it goes straight to what follows.
     if (isStill && lengthOf(scene) !== undefined) {
       const after = then ?? 'idle'
       scene = { ...scene, mode: after, style: after === 'think' ? 'bubble' : undefined, then: undefined }
     }
-    if (scene.mode === 'idle') return settle()
+    if (scene.mode === 'idle') return rest()
     if (!isStill && !timer && engine) timer = engine.every(TICK_MS[motion] ?? 100, tick)
     paint()
+  }
+  // A buddy has come or gone: the first to turn up while Claude waits starts a game, the last to go ends it.
+  const regroup = () => {
+    if (scene.mode === 'idle' && isPlaytime()) become('play')
+    else if (scene.mode === 'play' && gang.size === 0) become('idle')
+    else paint()
+  }
+  // Which subagents still run, by the engine's own list: it also catches one stopped before it could finish.
+  const rollCall = async () => {
+    try {
+      const ids = await engine?.subagents()
+      if (!ids) return
+      gang.clear()
+      for (const id of ids) gang.add(id)
+      regroup()
+    } catch {}
   }
 
   /** Seats Clawd beside this line, when the terminal has room for both. */
@@ -185,7 +218,13 @@ export const register: Register = (on, options) => {
   })
 
   on('turn.complete', ($, e, next) => {
-    if (e.agentId !== undefined) return next(e)
+    if (e.agentId !== undefined) {
+      // A subagent is done: its buddy leaves the game.
+      try {
+        if (gang.delete(e.agentId)) regroup()
+      } catch {}
+      return next(e)
+    }
     endedAt = Date.now()
     nextBreakAt = undefined
     running.clear()
@@ -197,6 +236,7 @@ export const register: Register = (on, options) => {
     if (!stays || e.reason === 'aborted') become('idle')
     else if (e.reason === 'answer') become('cheer', undefined, 'idle')
     else become('oops', undefined, 'idle')
+    void rollCall() // the subagents still out, to play with once the cheer is over
     engine?.redraw()
     return next(e)
   })

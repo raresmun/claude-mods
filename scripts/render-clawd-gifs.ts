@@ -11,6 +11,7 @@ import {
   CHEER_STYLES,
   draw,
   OOPS_STYLES,
+  PLAY_STYLES,
   ROWS,
   step,
   THINK_STYLES,
@@ -72,11 +73,17 @@ const LOOPS: Record<string, number> = {
   'work:nod': 16,
   'work:tug': 12,
   'work:merge': 16,
+  // Games, played with three buddies.
+  'play:catch': 36,
+  'play:stadium': 22,
+  'play:conga': 134,
+  'play:highfive': 54,
+  'play:pyramid': 40,
 }
 
 /** An act from its first frame: until it plays out, or for its loop. */
 function play(mode: Mode, style?: Style, extra: Partial<Scene> = {}): Scene[] {
-  const looped = mode === 'idle' || mode === 'think' || mode === 'work'
+  const looped = mode === 'idle' || mode === 'think' || mode === 'work' || mode === 'play'
   const length = looped ? (LOOPS[`${mode}:${style}`] ?? 24) : 60
   let scene: Scene = { mode, style, frame: 0, x: 2, dir: 1, headphones: false, then: 'idle', ...extra }
   const scenes: Scene[] = []
@@ -159,5 +166,6 @@ for (const [mode, styles] of [
 ] as const) {
   for (const style of styles) gif(`${mode}-${style}`, play(mode, style))
 }
+for (const style of PLAY_STYLES) gif(`play-${style}`, play('play', style, { buddies: 3 }))
 gif('think-bubble-headphones', play('think', 'bubble', { headphones: true }))
 console.log(`GIFs written to ${OUT}`)

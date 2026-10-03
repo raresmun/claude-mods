@@ -1,6 +1,6 @@
 {
   "name": "clawd",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Clawd, the Claude mascot, thinks, types, runs and celebrates beside the thinking line, a little differently each turn",
   "author": { "name": "raresmun" },
   "homepage": "https://github.com/raresmun/claude-mods/tree/main/plugins/clawd",

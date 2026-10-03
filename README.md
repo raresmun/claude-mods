@@ -8,7 +8,7 @@ Mods for [Claude Code](https://code.claude.com): small plugins that change how C
 
 ![Clawd beside Claude Code's thinking line: a cat for cat README.md, a disguise for sudo, a table flip on the second error, an explosion for git push --force](docs/clawd/demo.gif)
 
-A tiny pixel Clawd who lives next to Claude Code's thinking line and acts out what Claude is doing: 74 acts, picked at random or by the tool and command Claude is running. When the turn ends he cheers beside the "Baked for 12s" line, then stands still until your next message.
+A tiny pixel Clawd who lives next to Claude Code's thinking line and acts out what Claude is doing: 79 acts, picked at random or by the tool and command Claude is running. When the turn ends he cheers beside the "Baked for 12s" line, then stands still until your next message, or, while subagents are still out working, plays games with them.
 
 ### Install
 
@@ -26,7 +26,7 @@ He shows up beside the thinking line on your next message.
 
 - Terminal only, in windows about 66 columns wide or more.
 - Costs no tokens: he only draws on your screen and never changes what Claude does.
-- Light: one tiny frame every 100 ms while Claude works (well under 1% of a CPU core), nothing at all when idle.
+- Light: one tiny frame every 100 ms while Claude works or waits on subagents (well under 1% of a CPU core), nothing at all when idle.
 - Mods are an early-access Claude Code feature, so an update can break him. If it does, Claude Code skips the mod and carries on as normal.
 
 ### Settings
@@ -38,7 +38,7 @@ In Claude Code, open `/config` and look for Clawd:
 | Motion | `normal`, `calm` (slower), `lively` (faster), or `still` (a pose for each act, no animation) | `normal` |
 | Command puns | on, or off to have commands just run | on |
 | Breaks on long turns | on or off | on |
-| When Claude is done | `stay` (he cheers, then waits by the turn's last line) or `hide` (he leaves with the thinking line) | `stay` |
+| When Claude is done | `stay` (he cheers, then waits by the turn's last line, playing with any subagents still running) or `hide` (he leaves with the thinking line) | `stay` |
 
 He also holds still when Claude Code's own Reduce motion setting is on.
 
@@ -48,7 +48,7 @@ He also holds still when Claude Code's own Reduce motion setting is on.
 /plugin uninstall clawd@raresmun-mods
 ```
 
-## All 74 acts
+## All 79 acts
 
 Every GIF below is rendered from the mod's own drawing code, cell by cell as your terminal draws it.
 
@@ -146,6 +146,18 @@ One at random.
 | ![](docs/clawd/cheer-shades.gif) | **Deal with it** | |
 | ![](docs/clawd/cheer-disco.gif) | **Disco** | |
 | ![](docs/clawd/cheer-moonwalk.gif) | **Moonwalk** | |
+
+### While Claude waits on subagents
+
+When a turn ends with subagents still running, he plays with them beside the turn's last line: a mini Clawd in its own colour for each subagent (up to five), and a new game every 20 seconds. A buddy leaves when its subagent is done, and with the last one gone he stands still again.
+
+| | Game | |
+|---|---|---|
+| ![](docs/clawd/play-catch.gif) | **Catch** | Down the line and back |
+| ![](docs/clawd/play-stadium.gif) | **Stadium wave** | |
+| ![](docs/clawd/play-conga.gif) | **Conga line** | One, two, three, kick! |
+| ![](docs/clawd/play-highfive.gif) | **High fives** | One at a time, leapfrogging the others |
+| ![](docs/clawd/play-pyramid.gif) | **Pyramid** | It never holds for long |
 
 ### On long turns
 
